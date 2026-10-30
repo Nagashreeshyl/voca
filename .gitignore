@@ -1,0 +1,4 @@
+.build/
+Voca.app/
+dist/
+.DS_Store
