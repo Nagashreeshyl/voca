@@ -30,7 +30,9 @@ enum LLM {
     You are Voca, a concise assistant the user talks to by voice. The text between <<< and >>> is their spoken \
     question or request (a speech-to-text transcript, so expect small recognition errors). Answer it helpfully. \
     If they ask you to write something (an email, a message), write it ready to use. \
-    Keep it under 150 words unless they ask for more. Markdown is fine.
+    Keep it under 150 words unless they ask for more.
+    Write plain text only, like a chat message: no Markdown, no tables, no headings, no bold or italics, no HTML. \
+    Use short paragraphs; for steps or items, use simple lines starting with "1. " or "- ".
     """
 
     typealias Send = (Provider, [[String: String]]) async throws -> String
@@ -45,7 +47,7 @@ enum LLM {
     /// Returns an answer, or nil when every provider failed.
     static func answer(_ question: String, providers: [Provider], send: Send = chat) async -> (text: String, provider: String)? {
         await firstSuccess(answerPrompt, question, providers, send) {
-            let t = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            let t = plain($0)
             return t.isEmpty ? nil : t
         }
     }
@@ -63,6 +65,27 @@ enum LLM {
             }
         }
         return nil
+    }
+
+    /// Safety net for models that still answer in Markdown: strips it to readable plain text.
+    static func plain(_ s: String) -> String {
+        var lines: [String] = []
+        for raw in s.replacingOccurrences(of: "<br>", with: " ").replacingOccurrences(of: "<br/>", with: " ")
+            .components(separatedBy: "\n") {
+            var l = raw.trimmingCharacters(in: .whitespaces)
+            if l.hasPrefix("|") {
+                // Table: drop the |---| divider, turn "| a | b |" into "a: b".
+                let cells = l.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                if cells.allSatisfy({ $0.allSatisfy { "-: ".contains($0) } }) { continue }
+                l = cells.joined(separator: ": ")
+            }
+            while l.hasPrefix("#") { l.removeFirst() }
+            l = l.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "__", with: "")
+                 .replacingOccurrences(of: "`", with: "")
+            if l.hasPrefix("* ") { l = "- " + l.dropFirst(2) }
+            lines.append(l.trimmingCharacters(in: .whitespaces))
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Pulls {"text": …} out of model output, tolerating ``` fences or text around it.

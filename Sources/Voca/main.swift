@@ -327,6 +327,10 @@ enum SelfTest {
         let r3 = await LLM.answer("q", providers: ps) { _, _ in throw VocaError("down") }
         precondition(r3 == nil)
 
+        // Markdown in answers becomes plain text
+        precondition(LLM.plain("## Quick Facts\n| Topic | Details |\n|---|---|\n| **Owner** | Google<br>since 2013 |\n* item") ==
+                     "Quick Facts\nTopic: Details\nOwner: Google since 2013\n- item")
+
         // Whisper hallucination filter: a silent segment is dropped, real speech kept
         precondition(Transcriber.speech(from: ["segments": [
             ["text": " Hello there.", "no_speech_prob": 0.01, "avg_logprob": -0.2],

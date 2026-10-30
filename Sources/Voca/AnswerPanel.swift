@@ -160,7 +160,7 @@ struct AnswerView: View {
                     .buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.small)
             }
             ScrollView {
-                Text(Self.markdown(answer))
+                Text(answer)
                     .font(.body)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -182,9 +182,6 @@ struct AnswerView: View {
         .padding(10)
     }
 
-    static func markdown(_ s: String) -> AttributedString {
-        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
-    }
 }
 
 final class CopyState: ObservableObject { @Published var copied = false }
