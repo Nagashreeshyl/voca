@@ -68,6 +68,7 @@ git clone https://github.com/Nagashreeshyl/voca.git && cd voca
 Click the **waveform** in the menu bar to get:
 - **Recent:** each dictation from the last 24 hours, with *Paste Again*, *Copy*, *Copy What I Said* and *Retry*.
 - **Mode:** *Clean up with AI* (default), or *Raw* (your exact words, no AI).
+- **Microphone:** *MacBook Microphone* (default) starts recording in about 0.1 s. A Bluetooth headset mic takes 1–2 s to switch on and makes your headphones sound like a phone call while it's in use. Choose *System Default* if you'd rather use your headset mic.
 - **API Keys…**, **Launch at Login**, and **Advanced → Edit Models (JSON)** for swapping AI models.
 
 ### Teach it your words

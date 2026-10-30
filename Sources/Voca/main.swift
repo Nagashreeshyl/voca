@@ -64,6 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var busy = false
     private var lastStatus = "Ready: hold Fn to dictate"
 
+    private var useBuiltInMic: Bool {
+        get { UserDefaults.standard.object(forKey: "useBuiltInMic") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "useBuiltInMic") }
+    }
+
     private var mode: Mode {
         get { Mode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .clean }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "mode") }
@@ -124,6 +129,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             modeItem.submenu!.addItem(i)
         }
         menu.addItem(modeItem)
+        let mic = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
+        mic.submenu = NSMenu()
+        if Recorder.builtInMic() != nil {
+            let b = item("MacBook Microphone (starts instantly)", #selector(setMic(_:)), obj: true)
+            b.state = useBuiltInMic ? .on : .off
+            mic.submenu!.addItem(b)
+        }
+        let d = item("System Default (slower with Bluetooth)", #selector(setMic(_:)), obj: false)
+        d.state = useBuiltInMic && Recorder.builtInMic() != nil ? .off : .on
+        mic.submenu!.addItem(d)
+        menu.addItem(mic)
         let login = item("Launch at Login", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
@@ -181,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.run(e) }
     }
     @objc private func clearHistory() { history.clear() }
+    @objc private func setMic(_ s: NSMenuItem) { useBuiltInMic = s.representedObject as? Bool ?? true }
     @objc private func setMode(_ s: NSMenuItem) { if let m = Mode(rawValue: s.representedObject as? String ?? "") { mode = m } }
     @objc private func openKeys() { keys.show() }
     @objc private func openConfig() { NSWorkspace.shared.open(Config.url) }
@@ -207,7 +224,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startRecording() {
         guard !busy else { return }
         if Config.load().groqKey.isEmpty { keys.show(); return }
-        guard recorder.start() else { return }
+        recorder.useBuiltInMic = useBuiltInMic
+        guard recorder.start() else { overlay.flash("mic.slash.fill", "Couldn't open the microphone"); return }
         setIcon("mic.fill", tint: .systemRed)
         overlay.show(.listening)
         meterTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -239,12 +257,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Keep recording a moment after release so the last word isn't cut off.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [self] in
             busy = false
-            guard let (file, duration) = recorder.stop() else {
-                overlay.flash("mic.slash.fill", "Didn't hear anything")
-                return
+            recorder.stop { [self] result in
+                guard let (file, duration) = result else {
+                    overlay.flash("mic.slash.fill", "Didn't hear anything")
+                    return
+                }
+                guard duration > 0.5 else { try? FileManager.default.removeItem(at: file); overlay.hide(); return }
+                run(history.add(recording: file, ask: ask))
             }
-            guard duration > 0.5 else { try? FileManager.default.removeItem(at: file); overlay.hide(); return }
-            run(history.add(recording: file, ask: ask))
         }
     }
 
@@ -353,6 +373,11 @@ enum SelfTest {
 
         print("selftest OK")
     }
+}
+
+// Debug: `open -a Voca --args --mictest <out.txt>` compares how fast each capture path delivers sound.
+if let i = CommandLine.arguments.firstIndex(of: "--mictest"), i + 1 < CommandLine.arguments.count {
+    MicTest.run(out: CommandLine.arguments[i + 1])
 }
 
 // Debug: `Voca --clean "some transcript"` prints what dictation cleanup produces.
