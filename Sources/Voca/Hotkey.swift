@@ -1,6 +1,7 @@
 import AppKit
 
 /// Fn (Globe): hold to talk, double-tap to lock recording on, tap again to stop.
+/// Holding Shift at any point during a recording turns it into a question (answer popup instead of typing).
 final class Hotkey {
     static let fn: UInt16 = 63
     static let tapMax: TimeInterval = 0.25      // shorter than this = a tap, not a hold
@@ -11,6 +12,7 @@ final class Hotkey {
     var onCancel: () -> Void = {}
 
     private(set) var locked = false
+    private(set) var wantsAnswer = false
     private var isDown = false
     private var downAt: TimeInterval = 0
     private var lastTapUp: TimeInterval?
@@ -29,8 +31,12 @@ final class Hotkey {
             if isDown && !locked { isDown = false; suppressUp = true; onCancel() }
             return
         }
+        if isDown || locked, e.modifierFlags.contains(.shift) { wantsAnswer = true }
         guard e.keyCode == Self.fn else { return }
-        if e.modifierFlags.contains(.function) && !isDown { down(at: now) }
+        if e.modifierFlags.contains(.function) && !isDown {
+            down(at: now)
+            if e.modifierFlags.contains(.shift) { wantsAnswer = true } // Shift pressed before Fn
+        }
         else if !e.modifierFlags.contains(.function) && isDown { up(at: now) }
         else if !e.modifierFlags.contains(.function) && suppressUp { suppressUp = false }
     }
@@ -41,6 +47,7 @@ final class Hotkey {
         let isDouble = lastTapUp.map { now - $0 < Self.doubleTapGap } ?? false
         lastTapUp = nil
         downAt = now
+        wantsAnswer = false
         onStart()
         if isDouble { locked = true }
     }

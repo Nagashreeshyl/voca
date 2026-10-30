@@ -3,14 +3,15 @@
 <h1 align="center">Voca</h1>
 <p align="center"><b>Free, AI-powered voice dictation for macOS, in the style of Wispr Flow.</b><br>
 Hold <kbd>Fn</kbd>, speak, and clean, punctuated, formatted text appears wherever your cursor is.<br>
-Ask it a question instead and the answer shows up in a Liquid Glass popup.</p>
+Hold <kbd>Fn</kbd> + <kbd>Shift</kbd> to ask a question instead, and the answer shows up in a Liquid Glass popup.</p>
 
 ---
 
 ## Features
 - **Hold Fn to talk** anywhere: Mail, Slack, Notes, your browser, your code editor.
-- **AI cleanup:** fixes grammar and punctuation, removes "um" and "uh", applies your corrections ("at 5, no, at 6" becomes "at 6"), and turns "first… second…" into a `1.` `2.` list.
-- **Knows when you're asking a question:** "what's the capital of Australia?" shows an answer popup and types nothing.
+- **Accurate:** Whisper large-v3 on lossless audio, plus your own vocabulary list so names and jargon are spelled right. Silent recordings are thrown away, so you won't get a random "Thank you." typed.
+- **Faithful AI cleanup:** fixes grammar and punctuation, removes "um" and "uh", applies your corrections ("at 5, no actually at 6" becomes "at 6"), and turns "first… second…" into a `1.` `2.` list, while keeping your own words. It never answers what you dictate, so dictating prompts to ChatGPT or Claude just works.
+- **Ask with Fn + Shift:** "what's the capital of Australia?" shows an answer popup and types nothing.
 - **Double-tap Fn** locks recording on for long dictation. Tap once more to stop.
 - **Liquid Glass UI** with a live waveform that follows your voice.
 - **History with retry:** every dictation is kept for 24 hours. You can paste it again, copy it, or retry a failed one, and then it's deleted automatically.
@@ -62,17 +63,21 @@ git clone https://github.com/Nagashreeshyl/voca.git && cd voca
 |---|---|
 | Hold **Fn**, speak, release | Cleaned text is typed at your cursor |
 | **Double-tap Fn** | Recording locks on; tap Fn again to stop |
-| Ask a question | The answer appears in a popup (**Copy**, or **Esc** to close) |
+| Hold **Fn + Shift**, ask, release | The answer appears in a popup (**Copy**, or **Esc** to close). The waveform turns orange while asking |
 
 Click the **waveform** in the menu bar to get:
 - **Recent:** each dictation from the last 24 hours, with *Paste Again*, *Copy*, *Copy What I Said* and *Retry*.
-- **Mode:** *Auto* (type or answer), *Dictation only* (never answers), or *Raw* (your exact words, no AI).
+- **Mode:** *Clean up with AI* (default), or *Raw* (your exact words, no AI).
 - **API Keys…**, **Launch at Login**, and **Advanced → Edit Models (JSON)** for swapping AI models.
+
+### Teach it your words
+Under **Advanced → Edit Models (JSON)**, set `"vocabulary"` to names and terms you often say. Example: `"vocabulary": "Kubernetes, Priya, Acme Corp, PostgreSQL"`. Both Whisper and the cleanup step will then spell them exactly that way.
 
 ## Troubleshooting
 - **Nothing gets typed.** Accessibility is off. Voca copies the text to your clipboard instead, so you can press Cmd+V. Turn it on as described above, then quit and reopen Voca. The menu shows **⚠️ Allow Voca to type** while the permission is missing.
 - **Fn opens emoji or dictation.** Set "Press 🌐 key to" → Do Nothing (see step 3).
-- **"Couldn't transcribe."** Check your Groq key, then use **Recent → Retry**. Your audio is saved.
+- **"Didn't hear anything."** The recording was silent. Check that the right microphone is selected in System Settings → Sound → Input.
+- **"Failed. Retry from the menu."** Check your Groq key, then use **Recent → Retry**. Your audio is saved.
 - **A free model stopped working.** Free models change. Use **Advanced → Edit Models** to change `groqModel` / `openrouterModel` / `opencodeModel`.
 
 ## Privacy

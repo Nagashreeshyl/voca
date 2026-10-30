@@ -8,8 +8,10 @@ struct HistoryEntry: Codable {
     var intent: String?
     var provider: String?
     var error: String?
+    var ask: Bool?   // recorded with Fn+Shift
+    var file: String? // nil for v1.0 entries, which were always .m4a
 
-    var audio: URL { History.audioDir.appendingPathComponent("\(id.uuidString).m4a") }
+    var audio: URL { History.audioDir.appendingPathComponent(file ?? "\(id.uuidString).m4a") }
 }
 
 /// Dictations from the last 24 hours with their audio, so a failed one can be retried.
@@ -41,8 +43,9 @@ final class History {
     }
 
     /// Moves the recording into history and returns the new entry.
-    func add(recording: URL) -> HistoryEntry {
-        let e = HistoryEntry(id: UUID(), date: Date())
+    func add(recording: URL, ask: Bool) -> HistoryEntry {
+        let id = UUID()
+        let e = HistoryEntry(id: id, date: Date(), ask: ask, file: "\(id.uuidString).\(recording.pathExtension)")
         try? FileManager.default.moveItem(at: recording, to: e.audio)
         entries.insert(e, at: 0)
         save()

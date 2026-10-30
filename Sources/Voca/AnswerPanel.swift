@@ -9,6 +9,7 @@ final class OverlayModel: ObservableObject {
     @Published var phase: Phase = .hidden
     @Published var levels = [CGFloat](repeating: 0, count: barCount)
     @Published var locked = false
+    @Published var asking = false
 
     func push(_ level: CGFloat) {
         levels.removeFirst()
@@ -53,7 +54,7 @@ struct OverlayView: View {
         switch model.phase {
         case .thinking: "sparkles"
         case .message(let icon, _): icon
-        default: model.locked ? "lock.fill" : "mic.fill"
+        default: model.asking ? "questionmark.bubble.fill" : (model.locked ? "lock.fill" : "mic.fill")
         }
     }
 
@@ -61,7 +62,7 @@ struct OverlayView: View {
         HStack(alignment: .center, spacing: 2.5) {
             ForEach(Array(model.levels.enumerated()), id: \.offset) { i, level in
                 Capsule()
-                    .fill(LinearGradient(colors: [.cyan, .blue, .purple], startPoint: .top, endPoint: .bottom))
+                    .fill(LinearGradient(colors: model.asking ? [.yellow, .orange, .pink] : [.cyan, .blue, .purple], startPoint: .top, endPoint: .bottom))
                     // Taper the edges so the waveform reads as a soft shape.
                     .frame(width: 3, height: 3 + level * 25 * taper(i))
             }
@@ -132,6 +133,7 @@ final class Overlay {
     func hide() {
         model.phase = .hidden
         model.locked = false
+        model.asking = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [self] in
             if model.phase == .hidden { panel.orderOut(nil) }
         }

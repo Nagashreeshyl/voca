@@ -8,7 +8,8 @@ struct Config {
     static let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/voca/config.json")
     static let defaults: [String: String] = [
         "groqKey": "", "openrouterKey": "", "opencodeKey": "",
-        "whisperModel": "whisper-large-v3-turbo",
+        "whisperModel": "whisper-large-v3",
+        "vocabulary": "",
         "groqModel": "openai/gpt-oss-120b",
         "openrouterModel": "openrouter/free",
         "opencodeModel": "deepseek-v4.1-flash-free",
@@ -37,6 +38,8 @@ struct Config {
     private func v(_ k: String) -> String { values[k, default: ""].trimmingCharacters(in: .whitespacesAndNewlines) }
     var groqKey: String { v("groqKey") }
     var whisperModel: String { v("whisperModel") }
+    /// Comma-separated names and jargon, used as a spelling hint for Whisper and the cleanup step.
+    var vocabulary: String { v("vocabulary") }
     var providers: [Provider] {
         [Provider(name: "Groq", baseURL: "https://api.groq.com/openai/v1", key: v("groqKey"), model: v("groqModel")),
          Provider(name: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", key: v("openrouterKey"), model: v("openrouterModel")),
@@ -45,9 +48,8 @@ struct Config {
 }
 
 enum Mode: String, CaseIterable {
-    case auto = "Auto: type or answer"
-    case dictation = "Dictation only"
-    case raw = "Raw: no AI cleanup"
+    case clean = "Clean up with AI"
+    case raw = "Raw: exact words"
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -63,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastStatus = "Ready: hold Fn to dictate"
 
     private var mode: Mode {
-        get { Mode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .auto }
+        get { Mode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .clean }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "mode") }
     }
 
@@ -147,11 +149,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let text = (e.output ?? e.transcript ?? "").replacingOccurrences(of: "\n", with: " ")
         let title = e.error != nil ? "Failed: \(e.error!)" : text
         let i = NSMenuItem(title: "\(time)  \(title.count > 48 ? title.prefix(48) + "…" : title)", action: nil, keyEquivalent: "")
-        let symbol = e.error != nil ? "exclamationmark.triangle" : (e.intent == Intent.question.rawValue ? "questionmark.bubble" : "text.cursor")
+        let symbol = e.error != nil ? "exclamationmark.triangle" : (e.intent == "question" ? "questionmark.bubble" : "text.cursor")
         i.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         let sub = NSMenu()
         if e.output != nil {
-            if e.intent == Intent.question.rawValue { sub.addItem(item("Show Answer", #selector(showAnswer(_:)), obj: e.id)) }
+            if e.intent == "question" { sub.addItem(item("Show Answer", #selector(showAnswer(_:)), obj: e.id)) }
             sub.addItem(item("Paste Again", #selector(pasteAgain(_:)), obj: e.id))
             sub.addItem(item("Copy", #selector(copyOutput(_:)), obj: e.id))
         }
@@ -212,6 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             overlay.model.push(recorder.level())
             overlay.model.locked = hotkey.locked
+            overlay.model.asking = hotkey.wantsAnswer
         }
     }
 
@@ -231,8 +234,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func finishRecording() {
         guard meterTimer != nil else { return }
         stopMeter()
-        guard let (file, duration) = recorder.stop(), duration > 0.4 else { overlay.hide(); return }
-        run(history.add(recording: file))
+        busy = true
+        let ask = hotkey.wantsAnswer
+        // Keep recording a moment after release so the last word isn't cut off.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [self] in
+            busy = false
+            guard let (file, duration) = recorder.stop() else {
+                overlay.flash("mic.slash.fill", "Didn't hear anything")
+                return
+            }
+            guard duration > 0.5 else { try? FileManager.default.removeItem(at: file); overlay.hide(); return }
+            run(history.add(recording: file, ask: ask))
+        }
     }
 
     /// Transcribe → AI → type or answer. Used for new recordings and retries.
@@ -248,21 +261,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let (transcript, stt) = try await Transcriber.transcribe(e.audio, config: config)
                 guard !transcript.isEmpty else { throw VocaError("heard nothing") }
                 e.transcript = transcript
-                let r = mode == .raw
-                    ? LLMResult(intent: .dictation, text: transcript, provider: "raw")
-                    : await LLM.process(transcript, providers: config.providers, forceDictation: mode == .dictation)
-                e.output = r.text; e.intent = r.intent.rawValue; e.provider = r.provider; e.error = nil
-                lastStatus = "Last: \(r.intent.rawValue) · \(stt) → \(r.provider)"
-                overlay.hide()
-                switch r.intent {
-                case .dictation: deliver(r.text)
-                case .question: answers.show(question: transcript, answer: r.text, provider: r.provider)
+                if e.ask == true {
+                    guard let r = await LLM.answer(transcript, providers: config.providers) else { throw VocaError("no AI provider answered") }
+                    e.output = r.text; e.intent = "question"; e.provider = r.provider; e.error = nil
+                    lastStatus = "Last: answer · \(stt) → \(r.provider)"
+                    overlay.hide()
+                    answers.show(question: transcript, answer: r.text, provider: r.provider)
+                } else {
+                    let r = mode == .raw
+                        ? (text: transcript, provider: "raw")
+                        : await LLM.clean(transcript, providers: config.providers, vocabulary: config.vocabulary)
+                    e.output = r.text; e.intent = "dictation"; e.provider = r.provider; e.error = nil
+                    lastStatus = "Last: typed · \(stt) → \(r.provider)"
+                    overlay.hide()
+                    deliver(r.text)
                 }
             } catch {
                 e.error = error.localizedDescription
                 lastStatus = "Failed: retry from the menu"
                 NSSound.beep()
-                overlay.flash("exclamationmark.triangle.fill", "Couldn't transcribe. Retry from menu")
+                overlay.flash("exclamationmark.triangle.fill", "Failed. Retry from the menu")
             }
         }
     }
@@ -287,26 +305,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 enum SelfTest {
     static func run() async {
         // JSON parsing
-        precondition(LLM.parse(#"{"intent":"dictation","text":"Hello, world."}"#)! == (.dictation, "Hello, world."))
-        precondition(LLM.parse("```json\n{\"intent\":\"question\",\"text\":\"Canberra.\"}\n```")! == (.question, "Canberra."))
-        precondition(LLM.parse("Sure! {\"intent\":\"QUESTION\",\"text\":\" x \"}")! == (.question, "x"))
-        precondition(LLM.parse("no json here") == nil)
-        precondition(LLM.parse(#"{"intent":"other","text":"x"}"#) == nil)
-        precondition(LLM.parse(#"{"intent":"dictation","text":""}"#) == nil)
+        precondition(LLM.parseText(#"{"text":"Hello, world."}"#) == "Hello, world.")
+        precondition(LLM.parseText("```json\n{\"text\":\"1. Milk\\n2. Eggs\"}\n```") == "1. Milk\n2. Eggs")
+        precondition(LLM.parseText("Sure! {\"text\":\" x \"}") == "x")
+        precondition(LLM.parseText("no json here") == nil)
+        precondition(LLM.parseText(#"{"text":""}"#) == nil)
 
         // Provider fallback order
         let ps = [Provider(name: "A", baseURL: "", key: "k", model: ""),
                   Provider(name: "B", baseURL: "", key: "", model: ""),   // no key: skipped
                   Provider(name: "C", baseURL: "", key: "k", model: "")]
         var tried: [String] = []
-        let r1 = await LLM.process("hi", providers: ps) { p, _ in
+        let r1 = await LLM.clean("hi", providers: ps) { p, _ in
             tried.append(p.name)
             if p.name == "A" { throw VocaError("429") }
-            return #"{"intent":"dictation","text":"Hi."}"#
+            return #"{"text":"Hi."}"#
         }
         precondition(tried == ["A", "C"] && r1.provider == "C" && r1.text == "Hi.")
-        let r2 = await LLM.process("raw words", providers: ps) { _, _ in "garbage" }
-        precondition(r2.provider == "raw" && r2.text == "raw words" && r2.intent == .dictation)
+        let r2 = await LLM.clean("raw words", providers: ps) { _, _ in "garbage" }
+        precondition(r2.provider == "raw" && r2.text == "raw words")
+        let r3 = await LLM.answer("q", providers: ps) { _, _ in throw VocaError("down") }
+        precondition(r3 == nil)
+
+        // Whisper hallucination filter: a silent segment is dropped, real speech kept
+        precondition(Transcriber.speech(from: ["segments": [
+            ["text": " Hello there.", "no_speech_prob": 0.01, "avg_logprob": -0.2],
+            ["text": " Thank you.", "no_speech_prob": 0.9, "avg_logprob": -1.4],
+        ]]) == "Hello there.")
+        precondition(Transcriber.speech(from: ["text": " plain "]) == "plain")
 
         // Hotkey state machine
         var log: [String] = []
@@ -323,6 +349,17 @@ enum SelfTest {
 
         print("selftest OK")
     }
+}
+
+// Debug: `Voca --clean "some transcript"` prints what dictation cleanup produces.
+if let i = CommandLine.arguments.firstIndex(of: "--clean"), i + 1 < CommandLine.arguments.count {
+    let c = Config.load()
+    Task {
+        let r = await LLM.clean(CommandLine.arguments[i + 1], providers: c.providers, vocabulary: c.vocabulary)
+        print("[\(r.provider)] \(r.text)")
+        exit(0)
+    }
+    dispatchMain()
 }
 
 if CommandLine.arguments.contains("--selftest") {
